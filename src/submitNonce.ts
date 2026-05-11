@@ -16,17 +16,18 @@ async function main(): Promise<void> {
 
   const nonce = BigInt(nonceArg);
   const config = loadConfig();
-  const providerPool = new RotatingProvider(config.rpcUrls, config.rpcTimeoutMs);
-  const provider = providerPool.current();
+  const readPool = new RotatingProvider(config.readRpcUrls, config.rpcTimeoutMs);
+  const txPool = new RotatingProvider(config.txRpcUrls, config.rpcTimeoutMs);
+  const provider = readPool.current();
   const wallet = new Wallet(config.privateKey, provider);
   const stateStore = new MinerStateStore();
   const gasManager = new GasManager(config);
   const contractClient = new HashContractClient(provider, wallet);
-  const submitter = new TransactionSubmitter(config, wallet, contractClient, gasManager, stateStore, providerPool);
+  const submitter = new TransactionSubmitter(config, wallet, contractClient, gasManager, stateStore, readPool, txPool);
 
   const [balance, snapshot] = await Promise.all([
-    providerPool.withProvider((activeProvider) => activeProvider.getBalance(wallet.address)),
-    providerPool.withProvider((activeProvider) => {
+    readPool.withProvider((activeProvider) => activeProvider.getBalance(wallet.address)),
+    readPool.withProvider((activeProvider) => {
       const activeClient = new HashContractClient(activeProvider, wallet.connect(activeProvider));
       return activeClient.readSnapshot(wallet.address);
     }),

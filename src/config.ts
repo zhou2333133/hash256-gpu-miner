@@ -9,10 +9,15 @@ const moduleRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 export const PROJECT_ROOT = existsSync(join(process.cwd(), "package.json")) ? process.cwd() : moduleRoot;
 export const DATA_DIR = join(PROJECT_ROOT, "data");
 export const LOG_DIR = join(PROJECT_ROOT, "logs");
-const DEFAULT_PUBLIC_MAINNET_RPCS = [
+const DEFAULT_READ_RPCS = [
   "https://ethereum.publicnode.com",
-  "https://ethereum-rpc.publicnode.com",
-  "https://eth-mainnet.public.blastapi.io",
+  "https://eth.llamarpc.com",
+  "https://rpc.ankr.com/eth",
+];
+
+const DEFAULT_TX_RPCS = [
+  "https://rpc.mevblocker.io/fast",
+  "https://rpc.flashbots.net/fast",
 ];
 
 const envPath = join(PROJECT_ROOT, ".env");
@@ -23,7 +28,9 @@ if (existsSync(envPath)) {
 }
 
 export type AppConfig = {
-  rpcUrls: string[];
+  readRpcUrls: string[];
+  txRpcUrls: string[];
+  allowPublicFallback: boolean;
   privateKey: string;
   contractAddress: string;
   chainId: bigint;
@@ -114,16 +121,16 @@ function normalizePrivateKey(raw: string): string {
 }
 
 export function loadConfig(): AppConfig {
-  const configuredRpcUrls = [
-    readOptionalString("RPC_URL_PRIMARY"),
-    readOptionalString("RPC_URL_BACKUP_1"),
-    readOptionalString("RPC_URL_BACKUP_2"),
-  ].filter((url): url is string => Boolean(url));
-  const rpcUrls = dedupe(configuredRpcUrls.length > 0 ? [...configuredRpcUrls, ...DEFAULT_PUBLIC_MAINNET_RPCS] : DEFAULT_PUBLIC_MAINNET_RPCS);
-
-  if (rpcUrls.length === 0) {
-    throw new Error("At least one RPC_URL_* is required");
+  const readRpcUrls = loadReadRpcUrls();
+  const txRpcUrls = loadTxRpcUrls();
+  if (readRpcUrls.length === 0) {
+    throw new Error("At least one READ_RPC_URL is required");
   }
+  if (txRpcUrls.length === 0) {
+    throw new Error("At least one TX_RPC_URL is required");
+  }
+
+  const allowPublicFallback = readBool("ALLOW_PUBLIC_FALLBACK", true);
 
   const contractAddress = assertTargetContract(
     getAddress(readString("CONTRACT_ADDRESS", "0xAC7b5d06fa1e77D08aea40d46cB7C5923A87A0cc")),
@@ -151,7 +158,9 @@ export function loadConfig(): AppConfig {
   const cudaWorkerPath = process.env.CUDA_WORKER_PATH?.trim() || defaultCudaWorkerPath();
 
   return {
-    rpcUrls,
+    readRpcUrls,
+    txRpcUrls,
+    allowPublicFallback,
     privateKey: normalizePrivateKey(readString("MINER_PRIVATE_KEY")),
     contractAddress,
     chainId,
@@ -179,6 +188,38 @@ export function loadConfig(): AppConfig {
 function defaultCudaWorkerPath(): string {
   const exe = process.platform === "win32" ? "cuda_miner.exe" : "cuda_miner";
   return join(PROJECT_ROOT, "gpu", exe);
+}
+
+function loadReadRpcUrls(): string[] {
+  const primary = readOptionalString("READ_RPC_URL");
+  if (primary) {
+    return dedupe([
+      primary,
+      readOptionalString("READ_RPC_URL_BACKUP_1"),
+      readOptionalString("READ_RPC_URL_BACKUP_2"),
+    ].filter((url): url is string => Boolean(url)));
+  }
+  // Backward compat: fall back to old RPC_URL_PRIMARY for reads
+  const legacy = [
+    readOptionalString("RPC_URL_PRIMARY"),
+    readOptionalString("RPC_URL_BACKUP_1"),
+    readOptionalString("RPC_URL_BACKUP_2"),
+  ].filter((url): url is string => Boolean(url));
+  if (legacy.length > 0) {
+    return dedupe([...legacy, ...DEFAULT_READ_RPCS]);
+  }
+  return [...DEFAULT_READ_RPCS];
+}
+
+function loadTxRpcUrls(): string[] {
+  const primary = readOptionalString("TX_RPC_URL");
+  if (primary) {
+    return dedupe([
+      primary,
+      readOptionalString("TX_RPC_URL_BACKUP"),
+    ].filter((url): url is string => Boolean(url)));
+  }
+  return [...DEFAULT_TX_RPCS];
 }
 
 export function formatEthWei(wei: bigint): string {

@@ -20,14 +20,15 @@ type PendingCandidate = {
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const providerPool = new RotatingProvider(config.rpcUrls, config.rpcTimeoutMs);
-  const provider = providerPool.current();
+  const readPool = new RotatingProvider(config.readRpcUrls, config.rpcTimeoutMs);
+  const txPool = new RotatingProvider(config.txRpcUrls, config.rpcTimeoutMs);
+  const provider = readPool.current();
   const wallet = new Wallet(config.privateKey, provider);
   const stateStore = new MinerStateStore();
   const gasManager = new GasManager(config);
   const contractClient = new HashContractClient(provider, wallet);
   const coordinator = new MiningCoordinator(config, contractClient);
-  let submitter = new TransactionSubmitter(config, wallet, contractClient, gasManager, stateStore, providerPool);
+  let submitter = new TransactionSubmitter(config, wallet, contractClient, gasManager, stateStore, readPool, txPool);
   const dashboard = new TerminalDashboard(config);
   if (dashboard.enabled) {
     setConsoleLogging(false);
@@ -44,14 +45,14 @@ async function main(): Promise<void> {
   process.once("SIGINT", saveAndStop);
   process.once("SIGTERM", saveAndStop);
 
-  await providerPool.withProvider((activeProvider) => new HashContractClient(activeProvider).assertNetwork());
-  const network = await providerPool.withProvider((activeProvider) => activeProvider.getNetwork());
+  await readPool.withProvider((activeProvider) => new HashContractClient(activeProvider).assertNetwork());
+  const network = await readPool.withProvider((activeProvider) => activeProvider.getNetwork());
   assertMainnet(network.chainId);
-  const balance = await providerPool.withProvider((activeProvider) => activeProvider.getBalance(wallet.address));
+  const balance = await readPool.withProvider((activeProvider) => activeProvider.getBalance(wallet.address));
   dashboard.update({
     wallet: wallet.address,
     ethBalance: formatEther(balance),
-    rpc: providerPool.currentUrlLabel(),
+    rpc: readPool.currentUrlLabel(),
     status: config.autoSend && !config.dryRun ? "自动发送已就绪" : "只模拟",
   });
   dashboard.event("挖矿器已启动");
@@ -87,15 +88,15 @@ async function main(): Promise<void> {
   let pendingCandidate: PendingCandidate | undefined;
 
   while (!stopping) {
-    const snapshot = await providerPool.withProvider((activeProvider) => {
+    const snapshot = await readPool.withProvider((activeProvider) => {
       const activeClient = new HashContractClient(activeProvider, wallet.connect(activeProvider));
       return activeClient.readSnapshot(wallet.address);
     });
-    const activeProvider = providerPool.current();
+    const activeProvider = readPool.current();
     const activeWallet = wallet.connect(activeProvider);
     const activeContractClient = new HashContractClient(activeProvider, activeWallet);
-    submitter = new TransactionSubmitter(config, activeWallet, activeContractClient, gasManager, stateStore, providerPool);
-    dashboard.update({ rpc: providerPool.currentUrlLabel() });
+    submitter = new TransactionSubmitter(config, activeWallet, activeContractClient, gasManager, stateStore, readPool, txPool);
+    dashboard.update({ rpc: readPool.currentUrlLabel() });
 
     if (currentEpoch === undefined || currentEpoch !== snapshot.mining.epoch) {
       logger.info("Epoch changed; discarding old nonce range", {
@@ -193,7 +194,7 @@ async function main(): Promise<void> {
           scanned: totalScanned.toString(),
         });
       } else if (retryHandled.action === "retry-later") {
-        await sleepUntilNextBlock(providerPool, snapshot.blockNumber, config.epochRefreshMs);
+        await sleepUntilNextBlock(readPool, snapshot.blockNumber, config.epochRefreshMs);
         continue;
       } else {
         pendingCandidate = undefined;
@@ -299,7 +300,7 @@ async function main(): Promise<void> {
       pendingCandidate = candidate;
       dashboard.update({ status: "本区块满额，等待下一区块重试" });
       dashboard.event("本区块 mint 名额已满，下一区块自动重试");
-      await sleepUntilNextBlock(providerPool, snapshot.blockNumber, config.epochRefreshMs);
+      await sleepUntilNextBlock(readPool, snapshot.blockNumber, config.epochRefreshMs);
       continue;
     }
     if (handled.action === "epoch-changed") {
@@ -402,14 +403,14 @@ async function handleCandidate(
 }
 
 async function sleepUntilNextBlock(
-  providerPool: RotatingProvider,
+  readPool: RotatingProvider,
   previousBlockNumber: number,
   fallbackMs: number,
 ): Promise<void> {
   const deadline = Date.now() + 18_000;
   while (Date.now() < deadline) {
     try {
-      const blockNumber = await providerPool.withProvider((provider) => provider.getBlockNumber());
+      const blockNumber = await readPool.withProvider((provider) => provider.getBlockNumber());
       if (blockNumber > previousBlockNumber) {
         return;
       }

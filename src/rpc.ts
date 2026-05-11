@@ -4,7 +4,7 @@ import { EXPECTED_CHAIN_ID } from "./safety.js";
 
 export class RotatingProvider {
   private index = 0;
-  private providers: JsonRpcProvider[];
+  readonly providers: JsonRpcProvider[];
 
   constructor(
     private readonly urls: string[],
@@ -181,4 +181,86 @@ function isContractCallException(error: unknown): boolean {
   }
   const record = error as Record<string, unknown>;
   return record.code === "CALL_EXCEPTION";
+}
+
+// ── Broadcast error classification ──
+
+export type BroadcastErrorAction =
+  | { action: "known"; reason: string }
+  | { action: "nonce-too-low"; reason: string }
+  | { action: "underpriced"; reason: string }
+  | { action: "reverted"; reason: string }
+  | { action: "insufficient-funds"; reason: string }
+  | { action: "chain-id"; reason: string }
+  | { action: "network"; reason: string }
+  | { action: "unknown"; reason: string };
+
+const BROADCAST_KNOWN_PATTERNS = [
+  /\balready known\b/i,
+  /\balready in (mempool|pool)\b/i,
+];
+const BROADCAST_NONCE_LOW = /\bnonce too low\b/i;
+const BROADCAST_UNDERPRICED = /\breplacement transaction underpriced\b/i;
+const BROADCAST_INSUFFICIENT_FUNDS = /\binsufficient funds?\b/i;
+const BROADCAST_REVERTED = /\b(execution reverted|revert|call exception)\b/i;
+const BROADCAST_CHAIN_ID = /chain\s*id\s*(mismatch|does not match|incorrect)/i;
+const BROADCAST_NETWORK = /\b(timeout|timed out|econnrefused|econnreset|socket hang up|5\d{2}|service unavailable|bad gateway)\b/i;
+
+export function classifyBroadcastError(error: unknown): BroadcastErrorAction {
+  const message = extractErrorMessage(error);
+  const lower = message.toLowerCase();
+
+  if (BROADCAST_KNOWN_PATTERNS.some((p) => p.test(lower))) {
+    return { action: "known", reason: message };
+  }
+  if (BROADCAST_NONCE_LOW.test(lower)) {
+    return { action: "nonce-too-low", reason: message };
+  }
+  if (BROADCAST_UNDERPRICED.test(lower)) {
+    return { action: "underpriced", reason: message };
+  }
+  if (BROADCAST_INSUFFICIENT_FUNDS.test(lower)) {
+    return { action: "insufficient-funds", reason: message };
+  }
+  if (BROADCAST_REVERTED.test(lower)) {
+    return { action: "reverted", reason: message };
+  }
+  if (BROADCAST_CHAIN_ID.test(lower)) {
+    return { action: "chain-id", reason: message };
+  }
+  if (BROADCAST_NETWORK.test(lower)) {
+    return { action: "network", reason: message };
+  }
+
+  // ethers.js SERVER_ERROR code also indicates network-level failure
+  if (isServerError(error)) {
+    return { action: "network", reason: message };
+  }
+
+  return { action: "unknown", reason: message };
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return String(error);
+
+  const record = error as Record<string, unknown>;
+  // ethers.js v6 often nests the real error in a `.error` field
+  const inner = record.error ?? record.payload ?? record.reason;
+  if (inner && typeof inner === "object") {
+    const innerMsg = extractErrorMessage(inner);
+    if (innerMsg) return innerMsg;
+  }
+
+  if (typeof record.shortMessage === "string") return record.shortMessage;
+  if (typeof record.reason === "string") return record.reason;
+  if (typeof record.message === "string") return record.message;
+
+  return String(error);
+}
+
+function isServerError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  return record.code === "SERVER_ERROR";
 }
