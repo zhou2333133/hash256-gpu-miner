@@ -147,13 +147,13 @@ export function loadConfig(): AppConfig {
     throw new Error("AUTO_SEND=true requires DRY_RUN=false. Refusing ambiguous live mode.");
   }
 
-  const gasMultiplier = readNumber("GAS_MULTIPLIER", 1.15);
+  const gasMultiplier = readNumber("GAS_MULTIPLIER", 1.10);
   if (gasMultiplier <= 0 || gasMultiplier > 10) {
     throw new Error("GAS_MULTIPLIER must be > 0 and <= 10");
   }
 
-  const maxFeeGweiCap = readString("MAX_FEE_GWEI_CAP", "3");
-  const maxPriorityFeeGweiCap = readString("MAX_PRIORITY_FEE_GWEI_CAP", "0.5");
+  const maxFeeGweiCap = readString("MAX_FEE_GWEI_CAP", "1000");
+  const maxPriorityFeeGweiCap = readString("MAX_PRIORITY_FEE_GWEI_CAP", "100");
   const maxGasLimit = BigInt(readPositiveInt("MAX_GAS_LIMIT", 150000));
   const nonceBatchSize = BigInt(readPositiveInt("NONCE_BATCH_SIZE", 1_000_000_000));
   const cudaWorkerPath = process.env.CUDA_WORKER_PATH?.trim() || defaultCudaWorkerPath();
@@ -173,8 +173,8 @@ export function loadConfig(): AppConfig {
     maxPriorityFeePerGasWei: parseUnits(maxPriorityFeeGweiCap, "gwei"),
     gasMultiplier,
     maxGasLimit,
-    maxEthPerTxWei: parseEther(readString("MAX_ETH_PER_TX", "0.0002")),
-    maxEthPerHourWei: parseEther(readString("MAX_ETH_PER_HOUR", "0.002")),
+    maxEthPerTxWei: parseEther(readString("MAX_ETH_PER_TX", "0.002")),
+    maxEthPerHourWei: parseEther(readString("MAX_ETH_PER_HOUR", "0.01")),
     epochRefreshMs: readPositiveInt("EPOCH_REFRESH_SECONDS", 5) * 1000,
     gasRefreshMs: readPositiveInt("GAS_REFRESH_SECONDS", 10) * 1000,
     txConfirmations: readPositiveInt("TX_CONFIRMATIONS", 1),
