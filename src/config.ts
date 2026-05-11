@@ -141,8 +141,8 @@ export function loadConfig(): AppConfig {
     throw new Error(`CHAIN_ID must be ${EXPECTED_CHAIN_ID.toString()}`);
   }
 
-  const dryRun = readBool("DRY_RUN", true);
-  const autoSend = readBool("AUTO_SEND", false);
+  const dryRun = readBool("DRY_RUN", false);
+  const autoSend = readBool("AUTO_SEND", true);
   if (autoSend && dryRun) {
     throw new Error("AUTO_SEND=true requires DRY_RUN=false. Refusing ambiguous live mode.");
   }

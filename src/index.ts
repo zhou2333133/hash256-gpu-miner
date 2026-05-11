@@ -85,6 +85,7 @@ async function main(): Promise<void> {
   let totalScanned = saved?.scanned ? BigInt(saved.scanned) : 0n;
   let lastHashrateHps: number | undefined;
   let lastGasLog = 0;
+  let lastBalanceRefresh = 0;
   let pendingCandidate: PendingCandidate | undefined;
 
   while (!stopping) {
@@ -115,6 +116,15 @@ async function main(): Promise<void> {
       throw new Error(
         `Challenge mismatch. local=${locallyComputedChallenge}, chain=${snapshot.challenge}. Refusing to mine.`,
       );
+    }
+
+    // Refresh ETH balance every 60 seconds
+    if (Date.now() - lastBalanceRefresh >= 60_000) {
+      lastBalanceRefresh = Date.now();
+      try {
+        const freshBalance = await readPool.withProvider((p) => p.getBalance(wallet.address));
+        dashboard.update({ ethBalance: formatEther(freshBalance) });
+      } catch { /* balance refresh best-effort */ }
     }
 
     logger.info("Mining state", {

@@ -33,6 +33,7 @@ export class TerminalDashboard {
   private events: string[] = [];
   private timer?: NodeJS.Timeout;
   private startedAt = Date.now();
+  private lastLineCount = 0;
 
   readonly enabled: boolean;
 
@@ -45,6 +46,7 @@ export class TerminalDashboard {
       return;
     }
     process.stdout.write("\x1b[?25l");
+    this.lastLineCount = 0;
     this.timer = setInterval(() => this.render(), 500);
     this.render();
   }
@@ -63,18 +65,14 @@ export class TerminalDashboard {
 
   update(partial: DashboardState): void {
     this.state = { ...this.state, ...partial };
-    if (this.enabled) {
-      this.render();
-    }
+    // render() is called by 500ms interval; no need to call here
   }
 
   event(message: string): void {
     const time = new Date().toLocaleTimeString("en-US", { hour12: false });
     this.events.unshift(`${time} ${message}`);
     this.events = this.events.slice(0, 8);
-    if (this.enabled) {
-      this.render();
-    }
+    // render() is called by 500ms interval; no need to call here
   }
 
   private render(): void {
@@ -115,8 +113,12 @@ export class TerminalDashboard {
       dim("按 Ctrl+C 会保存状态并退出。完整日志：logs/miner.log"),
     ];
 
-    process.stdout.write("\x1b[H\x1b[2J");
-    process.stdout.write(`${lines.join("\n")}\n`);
+    const output = lines.join("\n") + "\n";
+    if (this.lastLineCount > 0) {
+      process.stdout.write(`\x1b[${this.lastLineCount}A\x1b[J`);
+    }
+    process.stdout.write(output);
+    this.lastLineCount = lines.length;
   }
 }
 
