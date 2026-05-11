@@ -1,0 +1,28 @@
+{
+  "name": "hash256-gpu-miner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --enable-source-maps dist/index.js",
+    "dev": "tsx src/index.ts",
+    "selftest": "tsx src/selftest.ts",
+    "submit-nonce": "tsx src/submitNonce.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "build:cuda": "nvcc -O3 -std=c++17 -arch=sm_75 -o gpu/cuda_miner gpu/cuda_miner.cu",
+    "build:cuda:win": "nvcc -O3 -std=c++17 -arch=sm_75 -o gpu/cuda_miner.exe gpu/cuda_miner.cu"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
