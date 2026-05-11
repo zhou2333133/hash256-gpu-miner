@@ -149,21 +149,41 @@ export function decodeHashContractError(error: unknown): string | undefined {
 }
 
 function findRevertData(value: unknown, depth = 0): string | undefined {
-  if (depth > 6 || value === null || typeof value !== "object") {
+  if (depth > 8 || value === null || typeof value !== "object") {
     return undefined;
   }
   const record = value as Record<string, unknown>;
-  for (const key of ["data", "revert"]) {
+
+  // Direct hex data fields in ethers v6 CallExceptionError
+  for (const key of ["data", "revert", "body"]) {
     const candidate = record[key];
     if (typeof candidate === "string" && /^0x[0-9a-fA-F]{8,}$/.test(candidate)) {
       return candidate;
     }
   }
-  for (const key of ["error", "info", "payload"]) {
+
+  // ethers v6 sometimes nests the actual error response under .error
+  // or wraps it in .info, .payload, .reason
+  // Check all known ethers v6 nesting paths
+  for (const key of ["error", "info", "payload", "reason", "shortMessage"]) {
     const nested = findRevertData(record[key], depth + 1);
     if (nested) {
       return nested;
     }
   }
+
+  // Also check raw response body for error data field
+  const response = record.body ?? record.response;
+  if (typeof response === "object" && response !== null) {
+    const respRecord = response as Record<string, unknown>;
+    const respError = respRecord.error;
+    const errData = (typeof respError === "object" && respError !== null
+        ? (respError as Record<string, unknown>).data
+        : undefined) ?? respRecord.result;
+    if (typeof errData === "string" && /^0x[0-9a-fA-F]{8,}$/.test(errData)) {
+      return errData;
+    }
+  }
+
   return undefined;
 }

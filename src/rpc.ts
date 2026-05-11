@@ -180,7 +180,15 @@ function isContractCallException(error: unknown): boolean {
     return false;
   }
   const record = error as Record<string, unknown>;
-  return record.code === "CALL_EXCEPTION";
+  if (record.code === "CALL_EXCEPTION") {
+    return true;
+  }
+  // ethers.js v6 may wrap revert data without CALL_EXCEPTION code
+  // check for hex revert data indicating a contract revert
+  if (typeof record.data === "string" && /^0x[0-9a-fA-F]{8,}$/.test(record.data)) {
+    return true;
+  }
+  return false;
 }
 
 // ── Broadcast error classification ──
