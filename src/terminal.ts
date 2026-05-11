@@ -5,7 +5,8 @@ import { MINE_SELECTOR, TARGET_CONTRACT } from "./safety.js";
 type DashboardState = {
   wallet?: string;
   ethBalance?: string;
-  rpc?: string;
+  readRpc?: string;
+  txRpc?: string;
   blockNumber?: number;
   genesisComplete?: boolean;
   epoch?: string;
@@ -90,7 +91,8 @@ export class TerminalDashboard {
       `${modeColor}${mode}\x1b[0m  ${dim("函数选择器")} ${MINE_SELECTOR}  ${dim("转账金额")} 0  ${dim("目标合约")} ${short(TARGET_CONTRACT)}`,
       "",
       `${label("钱包")} ${this.state.wallet ?? "-"}  ${label("ETH 余额")} ${this.state.ethBalance ?? "-"}`,
-      `${label("RPC")} ${this.state.rpc ?? "-"}  ${label("运行时长")} ${formatDuration(uptime)}`,
+      `${label("READ RPC")} ${this.state.readRpc ?? "-"}`,
+      `${label("TX RPC")} ${this.state.txRpc ?? "-"}  ${label("运行时长")} ${formatDuration(uptime)}`,
       "",
       `${label("区块")} ${this.state.blockNumber ?? "-"}  ${label("Epoch")} ${this.state.epoch ?? "-"}  ${label("本轮剩余区块")} ${this.state.epochBlocksLeft ?? "-"}`,
       `${label("创世完成")} ${this.state.genesisComplete === undefined ? "-" : yesNo(this.state.genesisComplete)}  ${label("单次奖励")} ${this.state.rewardHash ?? "-"} HASH  ${label("剩余可挖")} ${this.state.remainingHash ?? "-"} HASH`,

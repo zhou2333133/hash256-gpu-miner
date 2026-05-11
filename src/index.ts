@@ -52,7 +52,8 @@ async function main(): Promise<void> {
   dashboard.update({
     wallet: wallet.address,
     ethBalance: formatEther(balance),
-    rpc: readPool.currentUrlLabel(),
+    readRpc: readPool.currentUrlLabel(),
+    txRpc: config.txRpcUrls[0] + (config.txRpcUrls.length > 1 ? ` (备:${config.txRpcUrls.slice(1).join(", ")})` : ""),
     status: config.autoSend && !config.dryRun ? "自动发送已就绪" : "只模拟",
   });
   dashboard.event("挖矿器已启动");
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
     const activeWallet = wallet.connect(activeProvider);
     const activeContractClient = new HashContractClient(activeProvider, activeWallet);
     submitter = new TransactionSubmitter(config, activeWallet, activeContractClient, gasManager, stateStore, readPool, txPool);
-    dashboard.update({ rpc: readPool.currentUrlLabel() });
+    dashboard.update({ readRpc: readPool.currentUrlLabel() });
 
     if (currentEpoch === undefined || currentEpoch !== snapshot.mining.epoch) {
       logger.info("Epoch changed; discarding old nonce range", {
