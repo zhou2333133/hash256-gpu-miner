@@ -12,7 +12,6 @@ export const LOG_DIR = join(PROJECT_ROOT, "logs");
 const DEFAULT_READ_RPCS = [
   "https://ethereum.publicnode.com",
   "https://eth.llamarpc.com",
-  "https://rpc.ankr.com/eth",
 ];
 
 const DEFAULT_TX_RPCS = [

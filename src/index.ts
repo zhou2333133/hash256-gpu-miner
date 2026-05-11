@@ -1,6 +1,6 @@
 import { Wallet, formatEther, formatUnits } from "ethers";
 import { loadConfig, formatEthWei } from "./config.js";
-import { HashContractClient, compactHash } from "./contract.js";
+import { HashContractClient, compactHash, type ChainSnapshot } from "./contract.js";
 import { GasManager } from "./gas.js";
 import { logger, setConsoleLogging } from "./logger.js";
 import { currentEpochHitProbabilityLabel } from "./miningMath.js";
@@ -90,10 +90,20 @@ async function main(): Promise<void> {
   let pendingCandidate: PendingCandidate | undefined;
 
   while (!stopping) {
-    const snapshot = await readPool.withProvider((activeProvider) => {
-      const activeClient = new HashContractClient(activeProvider, wallet.connect(activeProvider));
-      return activeClient.readSnapshot(wallet.address);
-    });
+    let snapshot: ChainSnapshot;
+    try {
+      snapshot = await readPool.withProvider((activeProvider) => {
+        const activeClient = new HashContractClient(activeProvider, wallet.connect(activeProvider));
+        return activeClient.readSnapshot(wallet.address);
+      });
+    } catch (error) {
+      logger.error("Failed to read chain snapshot; retrying after delay", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      dashboard.update({ status: "读取链状态失败，等待重试" });
+      await sleep(config.epochRefreshMs * 3);
+      continue;
+    }
     const activeProvider = readPool.current();
     const activeWallet = wallet.connect(activeProvider);
     const activeContractClient = new HashContractClient(activeProvider, activeWallet);

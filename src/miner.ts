@@ -122,12 +122,15 @@ export class GpuMiner {
         }
       });
 
-      child.once("exit", (code) => {
+      child.once("exit", (code, signal) => {
         if (!settled) {
           if (code === 0) {
             finish(undefined);
           } else {
-            reject(new Error(`CUDA worker exited with code ${String(code)}`));
+            const reason = signal
+              ? `killed by signal ${signal} (${signalName(signal)})`
+              : `exited with code ${String(code)}`;
+            reject(new Error(`CUDA worker ${reason}`));
           }
         }
       });
@@ -262,6 +265,17 @@ export function initialNonceStart(saved?: string): bigint {
 
 function randomNonceStart(): bigint {
   return BigInt(`0x${randomBytes(8).toString("hex")}`);
+}
+
+function signalName(signal: string): string {
+  const names: Record<string, string> = {
+    SIGSEGV: "segfault (invalid memory access)",
+    SIGABRT: "abort (CUDA runtime assertion failed)",
+    SIGKILL: "killed by OOM killer or system",
+    SIGTERM: "termination request",
+    SIGBUS: "bus error (hardware/memory issue)",
+  };
+  return names[signal] ?? `signal ${signal}`;
 }
 
 export function recommendedCpuThreads(): number {
