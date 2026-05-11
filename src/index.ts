@@ -162,6 +162,20 @@ async function main(): Promise<void> {
       break;
     }
 
+    if (snapshot.mining.epochBlocksLeft <= config.epochEarlyExitBlocks) {
+      logger.info("Epoch ending soon; waiting for new challenge", {
+        epochBlocksLeft: snapshot.mining.epochBlocksLeft.toString(),
+        epoch: snapshot.mining.epoch.toString(),
+      });
+      dashboard.update({
+        epochBlocksLeft: snapshot.mining.epochBlocksLeft.toString(),
+        status: "Epoch 即将结束，等待新区块",
+      });
+      dashboard.event(`Epoch 剩余 ${snapshot.mining.epochBlocksLeft.toString()} 区块，暂停搜索`);
+      await sleepUntilNextBlock(readPool, snapshot.blockNumber, config.epochRefreshMs);
+      continue;
+    }
+
     if (pendingCandidate) {
       logger.info("Retrying pending candidate nonce", {
         nonce: pendingCandidate.nonce.toString(),

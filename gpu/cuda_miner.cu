@@ -25,45 +25,65 @@ struct Job {
 __constant__ uint8_t c_challenge[32];
 __constant__ uint8_t c_difficulty[32];
 
-// ── Direct state construction (no message buffer, no block array) ──
+// ── Scalar register-based hash: no arrays, no stack frame ──
 // Builds the 64-byte keccak256 input inline and applies padding,
-// then runs keccakf and extracts the 32-byte digest.
+// then runs keccakf_scalar (25 individual uint64_t lanes, fully unrolled).
 __device__ void hash_challenge_nonce(uint64_t nonce, uint8_t output[32]) {
-    uint64_t st[25] = {0};
+    // 25 individual lanes — zero initialized
+    uint64_t s00=0, s10=0, s20=0, s30=0, s40=0;
+    uint64_t s01=0, s11=0, s21=0, s31=0, s41=0;
+    uint64_t s02=0, s12=0, s22=0, s32=0, s42=0;
+    uint64_t s03=0, s13=0, s23=0, s33=0, s43=0;
+    uint64_t s04=0, s14=0, s24=0, s34=0, s44=0;
 
-    // Absorb challenge bytes 0–31 from constant memory into st[0..3]
+    // Absorb challenge bytes 0–31 from constant memory into s00, s10, s20, s30
     #pragma unroll
-    for (int w = 0; w < 4; w++) {
-        uint64_t lane = 0;
-        #pragma unroll
-        for (int j = 0; j < 8; j++) {
-            lane |= ((uint64_t)c_challenge[w * 8 + j]) << (8 * j);
-        }
-        st[w] ^= lane;
+    for (int j = 0; j < 8; j++) {
+        s00 |= ((uint64_t)c_challenge[j]) << (8 * j);
+    }
+    #pragma unroll
+    for (int j = 0; j < 8; j++) {
+        s10 |= ((uint64_t)c_challenge[8 + j]) << (8 * j);
+    }
+    #pragma unroll
+    for (int j = 0; j < 8; j++) {
+        s20 |= ((uint64_t)c_challenge[16 + j]) << (8 * j);
+    }
+    #pragma unroll
+    for (int j = 0; j < 8; j++) {
+        s30 |= ((uint64_t)c_challenge[24 + j]) << (8 * j);
     }
 
     // Absorb nonce as abi.encode(uint256): big-endian, zero-padded to 32 bytes.
-    // Bytes 32–55 (high 24 bytes of uint256) are zero → st[4..6] are already 0.
-    // Bytes 56–63 (low 8 bytes of uint256) are nonce in big-endian → st[7].
-    // The byte-reversal below produces the same LE lane value as the old
-    // block-absorb loop would.
+    // Bytes 32–55 (high 24 bytes of uint256) are zero → s40, s01, s11 are already 0.
+    // Bytes 56–63 (low 8 bytes of uint256) are nonce in big-endian → s21 (st[7]).
     uint64_t lane = 0;
     #pragma unroll
     for (int j = 0; j < 8; j++) {
         lane |= ((nonce >> (8 * j)) & 0xff) << (8 * (7 - j));
     }
-    st[7] ^= lane;
+    s21 ^= lane;
 
     // Keccak padding for rate = 136 bytes (pad10*1 rule)
-    st[8]  ^= 0x01ULL;                       // byte 64  = 0x01 (start padding)
-    st[16] ^= 0x8000000000000000ULL;         // byte 135 = 0x80 (end padding)
+    s31 ^= 0x01ULL;                       // st[8]  = byte 64  = 0x01
+    s13 ^= 0x8000000000000000ULL;         // st[16] = byte 135 = 0x80
 
-    keccakf(st);
+    // ── Full scalar keccakf ──
+    keccakf_scalar(
+        s00, s10, s20, s30, s40,
+        s01, s11, s21, s31, s41,
+        s02, s12, s22, s32, s42,
+        s03, s13, s23, s33, s43,
+        s04, s14, s24, s34, s44
+    );
 
-    // Extract digest: first 32 bytes, little-endian lane order
+    // Extract digest: first 32 bytes from s00, s10, s20, s30
     #pragma unroll
-    for (int i = 0; i < 32; i++) {
-        output[i] = (uint8_t)((st[i / 8] >> (8 * (i % 8))) & 0xff);
+    for (int i = 0; i < 8; i++) {
+        output[i]      = (uint8_t)((s00 >> (8 * i)) & 0xff);
+        output[8 + i]  = (uint8_t)((s10 >> (8 * i)) & 0xff);
+        output[16 + i] = (uint8_t)((s20 >> (8 * i)) & 0xff);
+        output[24 + i] = (uint8_t)((s30 >> (8 * i)) & 0xff);
     }
 }
 
@@ -78,9 +98,6 @@ __device__ __forceinline__ bool hash_less_than_difficulty(const uint8_t hash[32]
 }
 
 // ── Search kernel ──
-// Shared-memory early-exit flag replaces the old per-iteration global atomic.
-// Constant-memory challenge/difficulty eliminates global-memory reads.
-// Larger grid + chunk reduces kernel-launch overhead.
 __global__ void search_kernel(
     uint64_t  nonceStart,
     uint64_t  total,
@@ -97,14 +114,13 @@ __global__ void search_kernel(
     uint8_t  hash[32];
 
     for (uint64_t offset = idx; offset < total; offset += stride) {
-        // Volatile read from shared memory — no global traffic.
         if (sharedFound) return;
 
         hash_challenge_nonce(nonceStart + offset, hash);
 
         if (hash_less_than_difficulty(hash)) {
             int old = atomicCAS((int*)&sharedFound, 0, 1);
-            if (old == 0) {                  // I'm the winner
+            if (old == 0) {
                 *foundFlag  = 1;
                 *foundNonce = nonceStart + offset;
                 #pragma unroll
@@ -116,7 +132,51 @@ __global__ void search_kernel(
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  Host helpers (unchanged from original)
+//  Selftest — verifies scalar keccakf against baseline array keccakf
+// ══════════════════════════════════════════════════════════════════════════
+
+__global__ void selftest_kernel(
+    uint64_t *testNonces,
+    int       numTests,
+    int      *failCount
+) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= numTests) return;
+
+    uint64_t nonce = testNonces[tid];
+
+    // Compute reference hash via baseline array keccakf
+    // Build 64-byte input: challenge || nonce (abi.encode)
+    uint8_t input[64];
+    for (int i = 0; i < 32; i++) input[i] = c_challenge[i];
+    // Big-endian uint256 padding with zero, nonce in low 8 bytes
+    for (int i = 0; i < 24; i++) input[32 + i] = 0;
+    input[56] = (uint8_t)(nonce >> 56) & 0xff;
+    input[57] = (uint8_t)(nonce >> 48) & 0xff;
+    input[58] = (uint8_t)(nonce >> 40) & 0xff;
+    input[59] = (uint8_t)(nonce >> 32) & 0xff;
+    input[60] = (uint8_t)(nonce >> 24) & 0xff;
+    input[61] = (uint8_t)(nonce >> 16) & 0xff;
+    input[62] = (uint8_t)(nonce >>  8) & 0xff;
+    input[63] = (uint8_t)(nonce >>  0) & 0xff;
+
+    uint8_t expected[32];
+    keccak256_64(input, expected);
+
+    // Compute hash via scalar path (same as search_kernel uses)
+    uint8_t actual[32];
+    hash_challenge_nonce(nonce, actual);
+
+    for (int i = 0; i < 32; i++) {
+        if (expected[i] != actual[i]) {
+            atomicAdd(failCount, 1);
+            return;
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  Host helpers
 // ══════════════════════════════════════════════════════════════════════════
 
 static std::string extract_string(const std::string &json, const std::string &key) {
@@ -223,6 +283,62 @@ static void cuda_check(cudaError_t err, const char *where) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+//  Selftest runner (host)
+// ══════════════════════════════════════════════════════════════════════════
+
+static bool run_selftest(cudaStream_t stream) {
+    std::cerr << "{\"type\":\"progress\",\"scanned\":\"0\",\"hashrate\":0,\"gpuUtilization\":-1}" << std::endl;
+
+    const uint64_t fixed_tests[] = {
+        0ULL,
+        1ULL,
+        255ULL,
+        256ULL,
+        0xFFFFFFFFULL,
+        0xFFFFFFFFFFFFFFFFULL
+    };
+    const int num_fixed = sizeof(fixed_tests) / sizeof(fixed_tests[0]);
+
+    // Generate 1000 random nonces on host
+    const int num_random = 1000;
+    const int num_total = num_fixed + num_random;
+
+    std::vector<uint64_t> test_nonces(num_total);
+    for (int i = 0; i < num_fixed; i++) test_nonces[i] = fixed_tests[i];
+    for (int i = 0; i < num_random; i++) {
+        test_nonces[num_fixed + i] = ((uint64_t)rand() << 32) ^ (uint64_t)rand();
+    }
+
+    uint64_t *d_nonces = nullptr;
+    int *d_fail = nullptr;
+    int h_fail = 0;
+
+    cuda_check(cudaMalloc(&d_nonces, num_total * sizeof(uint64_t)), "selftest malloc nonces");
+    cuda_check(cudaMalloc(&d_fail, sizeof(int)), "selftest malloc fail");
+    cuda_check(cudaMemcpy(d_nonces, test_nonces.data(), num_total * sizeof(uint64_t), cudaMemcpyHostToDevice), "selftest copy nonces");
+    cuda_check(cudaMemcpy(d_fail, &h_fail, sizeof(int), cudaMemcpyHostToDevice), "selftest copy fail");
+
+    int threads = 256;
+    int blocks = (num_total + threads - 1) / threads;
+    selftest_kernel<<<blocks, threads, 0, stream>>>(d_nonces, num_total, d_fail);
+    cuda_check(cudaGetLastError(), "selftest launch");
+    cuda_check(cudaDeviceSynchronize(), "selftest sync");
+
+    cuda_check(cudaMemcpy(&h_fail, d_fail, sizeof(int), cudaMemcpyDeviceToHost), "selftest copy fail back");
+
+    cudaFree(d_nonces);
+    cudaFree(d_fail);
+
+    if (h_fail == 0) {
+        std::cerr << "selftest: ALL " << num_total << " nonces PASSED (scalar matches baseline)" << std::endl;
+        return true;
+    } else {
+        std::cerr << "selftest: " << h_fail << "/" << num_total << " nonces FAILED" << std::endl;
+        return false;
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 //  Main
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -236,11 +352,20 @@ int main() {
     Job job = parse_job(line);
     cuda_check(cudaSetDevice(job.deviceId), "cudaSetDevice");
 
+    cudaStream_t stream;
+    cuda_check(cudaStreamCreate(&stream), "cudaStreamCreate");
+
     // Copy read-only parameters to __constant__ (per-SM constant cache)
-    cuda_check(cudaMemcpyToSymbol(c_challenge, job.challenge, 32),
+    cuda_check(cudaMemcpyToSymbolAsync(c_challenge, job.challenge, 32, 0, cudaMemcpyHostToDevice, stream),
                "cudaMemcpyToSymbol challenge");
-    cuda_check(cudaMemcpyToSymbol(c_difficulty, job.difficulty, 32),
+    cuda_check(cudaMemcpyToSymbolAsync(c_difficulty, job.difficulty, 32, 0, cudaMemcpyHostToDevice, stream),
                "cudaMemcpyToSymbol difficulty");
+
+    // ── Selftest before mining ──
+    if (!run_selftest(stream)) {
+        std::cerr << "{\"type\":\"error\",\"message\":\"selftest failed — aborting\"}" << std::endl;
+        return 4;
+    }
 
     uint8_t  *d_hash  = nullptr;
     int      *d_found = nullptr;
@@ -259,12 +384,12 @@ int main() {
 
     while (processed < total) {
         int zero = 0;
-        cuda_check(cudaMemcpy(d_found, &zero, sizeof(int), cudaMemcpyHostToDevice),
+        cuda_check(cudaMemcpyAsync(d_found, &zero, sizeof(int), cudaMemcpyHostToDevice, stream),
                    "reset found");
         uint64_t remaining = total - processed;
         uint64_t thisChunk = remaining < chunk ? remaining : chunk;
 
-        search_kernel<<<blocks, threads>>>(
+        search_kernel<<<blocks, threads, 0, stream>>>(
             job.nonceStart + processed,
             thisChunk,
             d_found,
@@ -298,6 +423,7 @@ int main() {
             cudaFree(d_hash);
             cudaFree(d_found);
             cudaFree(d_nonce);
+            cudaStreamDestroy(stream);
             return 0;
         }
 
@@ -318,5 +444,6 @@ int main() {
     cudaFree(d_hash);
     cudaFree(d_found);
     cudaFree(d_nonce);
+    cudaStreamDestroy(stream);
     return 0;
 }

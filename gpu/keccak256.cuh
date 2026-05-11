@@ -6,6 +6,8 @@ __device__ __forceinline__ uint64_t rotl64(uint64_t x, int s) {
     return (x << s) | (x >> (64 - s));
 }
 
+// ── Baseline array-based keccakf (kept for selftest comparison) ──
+
 __device__ __constant__ uint64_t KECCAKF_RNDC[24] = {
     0x0000000000000001ULL, 0x0000000000008082ULL,
     0x800000000000808aULL, 0x8000000080008000ULL,
@@ -31,7 +33,7 @@ __device__ __constant__ int KECCAKF_PILN[24] = {
     15, 23, 19, 13, 12, 2, 20, 14, 22, 9, 6, 1
 };
 
-__device__ void keccakf(uint64_t st[25]) {
+__device__ void keccakf_baseline(uint64_t st[25]) {
     uint64_t bc[5];
 
     for (int round = 0; round < 24; round++) {
@@ -67,6 +69,8 @@ __device__ void keccakf(uint64_t st[25]) {
     }
 }
 
+// ── Generic keccak256 of a 64-byte input (uses baseline, reused by selftest) ──
+
 __device__ void keccak256_64(const uint8_t input[64], uint8_t output[32]) {
     uint64_t st[25];
     uint8_t block[136];
@@ -92,10 +96,12 @@ __device__ void keccak256_64(const uint8_t input[64], uint8_t output[32]) {
         st[i] ^= lane;
     }
 
-    keccakf(st);
+    keccakf_baseline(st);
 
     for (int i = 0; i < 32; i++) {
         output[i] = (uint8_t)((st[i / 8] >> (8 * (i % 8))) & 0xff);
     }
 }
 
+// ── Scalar register-based keccakf ──
+#include "keccakf_scalar.inc.h"

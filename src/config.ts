@@ -52,6 +52,7 @@ export type AppConfig = {
   cudaWorkerPath: string;
   terminalDashboard: boolean;
   rpcTimeoutMs: number;
+  epochEarlyExitBlocks: bigint;
 };
 
 function readString(name: string, fallback?: string): string {
@@ -182,6 +183,7 @@ export function loadConfig(): AppConfig {
     cudaWorkerPath,
     terminalDashboard: readBool("TERMINAL_DASHBOARD", true),
     rpcTimeoutMs: readPositiveInt("RPC_TIMEOUT_MS", 8000),
+    epochEarlyExitBlocks: BigInt(readPositiveInt("EPOCH_EARLY_EXIT_BLOCKS", 2)),
   };
 }
 
