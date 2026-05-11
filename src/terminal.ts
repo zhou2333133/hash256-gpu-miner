@@ -10,6 +10,7 @@ type DashboardState = {
   genesisComplete?: boolean;
   epoch?: string;
   epochBlocksLeft?: string;
+  epochProbability?: string;
   difficulty?: string;
   challenge?: string;
   rewardHash?: string;
@@ -95,6 +96,7 @@ export class TerminalDashboard {
       "",
       `${label("区块")} ${this.state.blockNumber ?? "-"}  ${label("Epoch")} ${this.state.epoch ?? "-"}  ${label("本轮剩余区块")} ${this.state.epochBlocksLeft ?? "-"}`,
       `${label("创世完成")} ${this.state.genesisComplete === undefined ? "-" : yesNo(this.state.genesisComplete)}  ${label("单次奖励")} ${this.state.rewardHash ?? "-"} HASH  ${label("剩余可挖")} ${this.state.remainingHash ?? "-"} HASH`,
+      `${label("当前 epoch 预计命中概率")} ${this.state.epochProbability ?? "-"}`,
       `${label("难度/目标")} ${this.state.difficulty ?? "-"}`,
       `${label("挑战值")} ${this.state.challenge ?? "-"}`,
       "",

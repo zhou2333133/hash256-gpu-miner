@@ -3,6 +3,7 @@ import { loadConfig, formatEthWei } from "./config.js";
 import { HashContractClient, compactHash } from "./contract.js";
 import { GasManager } from "./gas.js";
 import { logger, setConsoleLogging } from "./logger.js";
+import { currentEpochHitProbabilityLabel } from "./miningMath.js";
 import { MiningCoordinator, initialNonceStart } from "./miner.js";
 import { RotatingProvider } from "./rpc.js";
 import { EXPECTED_CHAIN_ID, MINE_SELECTOR, TARGET_CONTRACT, assertMainnet } from "./safety.js";
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
   let nonceStart = initialNonceStart(saved?.nextNonceStart);
   let currentEpoch = saved?.epoch ? BigInt(saved.epoch) : undefined;
   let totalScanned = saved?.scanned ? BigInt(saved.scanned) : 0n;
+  let lastHashrateHps: number | undefined;
   let lastGasLog = 0;
   let pendingCandidate: PendingCandidate | undefined;
 
@@ -130,6 +132,11 @@ async function main(): Promise<void> {
       genesisComplete: snapshot.genesis.complete,
       epoch: snapshot.mining.epoch.toString(),
       epochBlocksLeft: snapshot.mining.epochBlocksLeft.toString(),
+      epochProbability: currentEpochHitProbabilityLabel(
+        lastHashrateHps,
+        snapshot.mining.difficulty,
+        snapshot.mining.epochBlocksLeft,
+      ),
       difficulty: snapshot.mining.difficulty.toString(),
       challenge: compactHash(snapshot.challenge),
       rewardHash: formatUnits(snapshot.mining.reward, 18),
@@ -141,7 +148,7 @@ async function main(): Promise<void> {
 
     if (!snapshot.genesis.complete) {
       logger.warn("Mining is not open: genesisComplete=false. Waiting before next read.");
-      dashboard.update({ status: "等待创世完成" });
+      dashboard.update({ status: "等待创世完成", epochProbability: "-" });
       dashboard.event("挖矿尚未开放");
       await sleep(config.epochRefreshMs);
       continue;
@@ -149,7 +156,7 @@ async function main(): Promise<void> {
 
     if (snapshot.mining.remaining <= 0n || snapshot.mining.reward <= 0n) {
       logger.warn("Mining supply or reward exhausted. Exiting.");
-      dashboard.update({ status: "挖矿供应或奖励已耗尽" });
+      dashboard.update({ status: "挖矿供应或奖励已耗尽", epochProbability: "-" });
       dashboard.event("挖矿供应或奖励已耗尽");
       break;
     }
@@ -209,13 +216,20 @@ async function main(): Promise<void> {
     let batchScanned = 0n;
     const hit = await coordinator.search(job, (progress) => {
       batchScanned = progress.scanned;
+      lastHashrateHps = progress.hashrate;
       const displayedTotalScanned = totalScanned + batchScanned;
+      const epochProbability = currentEpochHitProbabilityLabel(
+        progress.hashrate,
+        snapshot.mining.difficulty,
+        snapshot.mining.epochBlocksLeft,
+      );
       dashboard.update({
         worker: progress.gpuUtilization === undefined ? "cpu" : "cuda",
         hashrateHps: Math.round(progress.hashrate),
         gpuUtilization: progress.gpuUtilization ?? "n/a",
         scannedBatch: progress.scanned.toString(),
         scannedTotal: displayedTotalScanned.toString(),
+        epochProbability,
       });
       const now = Date.now();
       if (now - lastGasLog >= config.gasRefreshMs) {
@@ -228,6 +242,7 @@ async function main(): Promise<void> {
           scannedTotal: displayedTotalScanned.toString(),
           epoch: snapshot.mining.epoch.toString(),
           difficulty: snapshot.mining.difficulty.toString(),
+          epochProbability,
         });
       }
     });
