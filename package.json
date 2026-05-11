@@ -10,8 +10,8 @@
     "selftest": "tsx src/selftest.ts",
     "submit-nonce": "tsx src/submitNonce.ts",
     "check": "tsc --noEmit -p tsconfig.json",
-    "build:cuda": "nvcc -O3 -std=c++17 -arch=sm_75 -o gpu/cuda_miner gpu/cuda_miner.cu",
-    "build:cuda:win": "nvcc -O3 -std=c++17 -arch=sm_75 -o gpu/cuda_miner.exe gpu/cuda_miner.cu"
+    "build:cuda": "node scripts/build-cuda.mjs",
+    "build:cuda:win": "node scripts/build-cuda.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
