@@ -100,6 +100,7 @@ async function main(): Promise<void> {
       logger.error("Failed to read chain snapshot; retrying after delay", {
         error: error instanceof Error ? error.message : String(error),
       });
+      dashboard.criticalError("所有 RPC 读取链状态失败");
       dashboard.update({ status: "读取链状态失败，等待重试" });
       await sleep(config.epochRefreshMs * 3);
       continue;
@@ -281,7 +282,7 @@ async function main(): Promise<void> {
           epochProbability,
         });
       }
-    });
+    }, (msg) => dashboard.criticalError(msg));
 
     if (stopping) {
       break;
@@ -394,6 +395,7 @@ async function handleCandidate(
     });
     dashboard.update({ status: "候选已过期" });
     dashboard.event("候选已丢弃：epoch 已变化");
+    dashboard.criticalError("候选已过期：epoch 已变化");
     return { action: "epoch-changed", currentEpoch: freshSnapshot.mining.epoch };
   }
 
@@ -405,6 +407,7 @@ async function handleCandidate(
     });
     dashboard.update({ status: "候选本地复核失败" });
     dashboard.event("候选已丢弃：本地复核失败");
+    dashboard.criticalError("候选无效：本地复核失败");
     return { action: "sent-or-final", nonce: candidate.nonce, epoch: candidate.epoch };
   }
 
@@ -413,6 +416,7 @@ async function handleCandidate(
     logger.warn("Candidate proof already used on-chain; discarding", { nonce: candidate.nonce.toString() });
     dashboard.update({ status: "候选已被使用" });
     dashboard.event("候选已丢弃：链上已使用");
+    dashboard.criticalError("候选已被使用");
     return { action: "sent-or-final", nonce: candidate.nonce, epoch: candidate.epoch };
   }
 
@@ -427,6 +431,10 @@ async function handleCandidate(
 
   if (!submission.sent && submission.retryable && submission.contractError === "BlockCapReached") {
     return { action: "retry-later", nonce: candidate.nonce, epoch: candidate.epoch };
+  }
+
+  if (!submission.sent) {
+    dashboard.criticalError(`交易发送失败：${submission.reason}`);
   }
 
   stateStore.saveLastState({

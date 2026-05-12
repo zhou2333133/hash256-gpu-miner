@@ -32,6 +32,7 @@ type DashboardState = {
 export class TerminalDashboard {
   private state: DashboardState = {};
   private events: string[] = [];
+  private criticalErrors: Array<{ message: string; time: number }> = [];
   private timer?: NodeJS.Timeout;
   private startedAt = Date.now();
   private lastLineCount = 0;
@@ -76,6 +77,27 @@ export class TerminalDashboard {
     // render() is called by 500ms interval; no need to call here
   }
 
+  criticalError(message: string): void {
+    this.criticalErrors.push({ message, time: Date.now() });
+    if (this.criticalErrors.length > 3) {
+      this.criticalErrors.shift();
+    }
+  }
+
+  private renderCriticalErrors(): string[] {
+    const now = Date.now();
+    const active = this.criticalErrors.filter((e) => now - e.time < 30_000);
+    if (active.length === 0) {
+      return [];
+    }
+    const lines: string[] = [red("严重错误")];
+    for (const err of active) {
+      const secs = Math.floor((now - err.time) / 1000);
+      lines.push(`  ${red(err.message)} ${dim(`${secs}s 前`)}`);
+    }
+    return lines;
+  }
+
   private render(): void {
     if (!this.enabled) {
       return;
@@ -112,6 +134,7 @@ export class TerminalDashboard {
       green("最近事件"),
       ...(this.events.length ? this.events.map((event) => `  ${event}`) : ["  -"]),
       "",
+      ...this.renderCriticalErrors(),
       dim("按 Ctrl+C 会保存状态并退出。完整日志：logs/miner.log"),
     ];
 
@@ -134,6 +157,9 @@ function label(value: string): string {
 
 function green(value: string): string {
   return `\x1b[32m${value}\x1b[0m`;
+}
+function red(value: string): string {
+  return `\x1b[31m${value}\x1b[0m`;
 }
 
 function dim(value: string): string {

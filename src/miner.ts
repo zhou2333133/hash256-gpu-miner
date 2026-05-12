@@ -224,7 +224,11 @@ export class MiningCoordinator {
     this.cpu = new CpuFallbackMiner(contractClient);
   }
 
-  async search(job: MinerJob, onProgress: (progress: MinerProgress) => void): Promise<MinerHit | undefined> {
+  async search(
+    job: MinerJob,
+    onProgress: (progress: MinerProgress) => void,
+    onCriticalError?: (message: string) => void,
+  ): Promise<MinerHit | undefined> {
     if (this.gpu.available()) {
       try {
         logger.info("Starting CUDA nonce search", {
@@ -238,6 +242,7 @@ export class MiningCoordinator {
         logger.warn("CUDA worker failed; falling back to CPU verification worker", {
           error: error instanceof Error ? error.message : String(error),
         });
+        onCriticalError?.("CUDA 工作进程崩溃，已退回 CPU 模式");
       }
     } else {
       logger.warn("CUDA worker not found; using CPU fallback", { path: this.config.cudaWorkerPath });
