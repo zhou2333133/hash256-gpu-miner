@@ -79,19 +79,18 @@ export class TerminalDashboard {
 
   criticalError(message: string): void {
     this.criticalErrors.push({ message, time: Date.now() });
-    if (this.criticalErrors.length > 3) {
+    if (this.criticalErrors.length > 10) {
       this.criticalErrors.shift();
     }
   }
 
   private renderCriticalErrors(): string[] {
-    const now = Date.now();
-    const active = this.criticalErrors.filter((e) => now - e.time < 30_000);
-    if (active.length === 0) {
+    if (this.criticalErrors.length === 0) {
       return [];
     }
+    const now = Date.now();
     const lines: string[] = [red("严重错误")];
-    for (const err of active) {
+    for (const err of this.criticalErrors) {
       const secs = Math.floor((now - err.time) / 1000);
       lines.push(`  ${red(err.message)} ${dim(`${secs}s 前`)}`);
     }
