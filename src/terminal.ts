@@ -32,7 +32,7 @@ type DashboardState = {
 export class TerminalDashboard {
   private state: DashboardState = {};
   private events: string[] = [];
-  private criticalErrors: Array<{ message: string; time: number }> = [];
+  private criticalErrors: Array<{ message: string; time: number; count: number }> = [];
   private timer?: NodeJS.Timeout;
   private startedAt = Date.now();
   private lastLineCount = 0;
@@ -78,9 +78,15 @@ export class TerminalDashboard {
   }
 
   criticalError(message: string): void {
-    this.criticalErrors.push({ message, time: Date.now() });
-    if (this.criticalErrors.length > 10) {
-      this.criticalErrors.shift();
+    const existing = this.criticalErrors.find((e) => e.message === message);
+    if (existing) {
+      existing.time = Date.now();
+      existing.count++;
+    } else {
+      this.criticalErrors.push({ message, time: Date.now(), count: 1 });
+      if (this.criticalErrors.length > 10) {
+        this.criticalErrors.shift();
+      }
     }
   }
 
@@ -92,7 +98,8 @@ export class TerminalDashboard {
     const lines: string[] = [red("严重错误")];
     for (const err of this.criticalErrors) {
       const secs = Math.floor((now - err.time) / 1000);
-      lines.push(`  ${red(err.message)} ${dim(`${secs}s 前`)}`);
+      const repeat = err.count > 1 ? ` x${err.count}` : "";
+      lines.push(`  ${red(err.message)}${repeat} ${dim(`${secs}s 前`)}`);
     }
     return lines;
   }
